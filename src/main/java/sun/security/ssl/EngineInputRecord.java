@@ -61,9 +61,12 @@ final class EngineInputRecord extends InputRecord {
      */
     private boolean internalData;
 
+    private boolean reduceInternalBytes;
+
     EngineInputRecord(SSLEngineImpl engine) {
         super();
         this.engine = engine;
+        reduceInternalBytes = false;
     }
 
     @Override
@@ -310,11 +313,30 @@ final class EngineInputRecord extends InputRecord {
         if (!formatVerified ||
                 (srcBB.get(srcBB.position()) != ct_application_data)) {
             internalData = true;
+
+            if (reduceInternalBytes && srcBB.get(srcBB.position()) != ct_alert)
+            {
+                System.out.println("Warn: receive non alert frame after start exchanging application data, "//
+                    + "re-expand internal byte array to maxRecordSize");
+                reduceInternalBytes = false;
+                buf = Arrays.copyOf(buf, maxRecordSize);
+            }
+
             read(new ByteBufferInputStream(srcBB), (OutputStream) null);
             return tmpBB;
         }
 
         internalData = false;
+
+        if (!reduceInternalBytes)
+        {
+            reduceInternalBytes = true;
+
+            // After start exchanging application data, internal data is useless (possible data type is 
+            // limited to alert) so we can reduce size from maxRecordSize (16921) to 
+            // maxAlertRecordSize (539). This save 16KB per session
+            buf = Arrays.copyOf(buf, maxAlertRecordSize);
+        }
 
         int srcPos = srcBB.position();
         int srcLim = srcBB.limit();
